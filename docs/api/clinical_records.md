@@ -548,7 +548,8 @@ Prescriptions are the sensitive operations, so they need the highest level a ses
 - Levels do not decay during a session; expiry ends it.
 - A session key cannot be the principal itself, and cannot be claimed by another principal while its session is active.
 - A session key only ever has its principal's permissions. Opening a Level 4 session for a patient does not let it write records.
-- Callers that never opened a session (full keys, the `vision_records` contract) are not affected.
+- Callers that never opened a session (full keys, the `vision_records` contract) skip the level check.
+- **Every `caller` must sign its call**, session key or full key. Passing someone else's address as `caller` without their signature fails. When the `vision_records` contract calls in with its own address, Soroban authorizes it automatically.
 
 ### `start_session`
 
@@ -979,6 +980,7 @@ When a session key makes a call, `caller` in the record events is its principal.
 
 ## Security and Privacy Notes
 
+1. **Caller authentication:** every function that takes `caller` requires `caller.require_auth()`, so permissions are only granted to whoever controls that address.
 1. **Single-caller gate:** Only `V_REC` can read or write clinical payloads. This is a contract-address check, not a user-role check.
 2. **No record ownership check:** The contract trusts `vision_records` to enforce patient/provider ownership and consent. A compromised or upgraded `V_REC` address can read and overwrite any clinical data.
 3. **Overwrite semantics:** `add_eye_examination` replaces existing data for the same `record_id`; there is no on-chain history.

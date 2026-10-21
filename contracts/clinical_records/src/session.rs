@@ -17,7 +17,8 @@
 //! | Write an examination or link its patient | [`EXAM_WRITE_LEVEL`] (Level 2) |
 //! | Any prescription read or write | [`PRESCRIPTION_LEVEL`] (Level 3) |
 //!
-//! Callers without a session (full keys and the `vision_records` contract) are not affected.
+//! Callers without a session (full keys and the `vision_records` contract) skip the level check,
+//! but every caller, session key or not, must sign its call.
 
 use crate::admin::require_initialized;
 use crate::errors::ContractError;
@@ -160,11 +161,12 @@ pub fn get_session(env: &Env, session_key: &Address) -> Option<ClinicalSession> 
     })
 }
 
-/// Returns the address to authorize `caller` as.
+/// Authenticates `caller` and returns the address to authorize it as.
 ///
-/// A caller without a session is returned unchanged, so full keys and the `vision_records`
-/// contract keep their existing checks. A session key must sign the call, its session must not
-/// have expired, and its level must be at least `required`; the principal is then returned.
+/// Every caller must sign the call. When the `vision_records` contract calls in, Soroban
+/// authorizes its own address automatically. A caller without a session is returned unchanged.
+/// A session key's session must not have expired and its level must be at least `required`;
+/// the principal is then returned.
 ///
 /// # Errors
 /// Returns `SessionExpired` if the session has expired, or `InsufficientAuthLevel` if its level
@@ -174,10 +176,10 @@ pub fn resolve_caller(
     caller: &Address,
     required: AuthLevel,
 ) -> Result<Address, ContractError> {
+    caller.require_auth();
     let Some(principal) = get_principal(env, caller) else {
         return Ok(caller.clone());
     };
-    caller.require_auth();
 
     let session = auth_session::get_session(env, caller).ok_or(ContractError::SessionExpired)?;
     let level =

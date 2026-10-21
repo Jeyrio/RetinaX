@@ -11,6 +11,7 @@ use clinical_records::{
     PrescriptionData, SlitLampFindings, VisualAcuity,
 };
 use soroban_sdk::{
+    contract, contractimpl,
     testutils::{Address as _, Ledger as _},
     Address, ConversionError, Env, InvokeError, String,
 };
@@ -386,4 +387,66 @@ fn full_keys_are_unaffected_by_sessions() {
         s.client
             .prepare_add_prescription(&s.doctor, &s.patient, &s.doctor, &rx_data(&s.env));
     s.client.commit_add_prescription(&s.doctor, &rx_id);
+}
+
+// ── Every caller must sign ───────────────────────────────────────────────────
+
+#[test]
+fn unsigned_call_with_a_providers_address_is_rejected() {
+    let s = setup();
+    add_exam(&s, &s.doctor, 1).unwrap().unwrap();
+
+    // Stop mocking signatures: passing the doctor's address without the doctor's signature
+    // must not grant the doctor's permissions.
+    s.env.set_auths(&[]);
+    assert!(s.client.try_get_eye_examination(&s.doctor, &1).is_err());
+    assert!(add_exam(&s, &s.doctor, 2).is_err());
+    assert!(s
+        .client
+        .try_prepare_add_prescription(&s.doctor, &s.patient, &s.doctor, &rx_data(&s.env))
+        .is_err());
+}
+
+/// Stands in for `vision_records`: calls clinical_records with its own address as `caller`.
+#[contract]
+struct VisionRecordsStub;
+
+#[contractimpl]
+impl VisionRecordsStub {
+    pub fn prepare(
+        env: Env,
+        clinical_records: Address,
+        patient: Address,
+        provider: Address,
+        data: PrescriptionData,
+    ) -> u64 {
+        ClinicalRecordsContractClient::new(&env, &clinical_records).prepare_add_prescription(
+            &env.current_contract_address(),
+            &patient,
+            &provider,
+            &data,
+        )
+    }
+}
+
+#[test]
+fn vision_records_contract_calls_are_authorized_without_signatures() {
+    let env = Env::default();
+    let admin = Address::generate(&env);
+    let stub_id = env.register(VisionRecordsStub, ());
+    let cr_id = env.register(ClinicalRecordsContract, ());
+    let client = ClinicalRecordsContractClient::new(&env, &cr_id);
+
+    env.mock_all_auths();
+    client.initialize(&admin, &stub_id, &None);
+    env.set_auths(&[]);
+
+    // No mocked signatures: the calling contract is authorized for its own address.
+    let rx_id = VisionRecordsStubClient::new(&env, &stub_id).prepare(
+        &cr_id,
+        &Address::generate(&env),
+        &Address::generate(&env),
+        &rx_data(&env),
+    );
+    assert_eq!(rx_id, 1);
 }
